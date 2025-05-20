@@ -259,28 +259,15 @@ class LocalAIManager:
                 service_metadata["running_ai_command"] = running_ai_command
                 # Create log files for stdout and stderr for AI process
                 os.makedirs("logs", exist_ok=True)
-                ai_log_stdout = Path(f"logs/{unique_instance_id}_stdout.log")
-                ai_log_stderr = Path(f"logs/{unique_instance_id}_stderr.log")
                 try:
-                    with open(ai_log_stdout, 'w') as stdout_log, open(ai_log_stderr, 'w') as stderr_log:
-                        ai_process = subprocess.Popen(
-                            running_ai_command,
-                            stdout=stdout_log,
-                            stderr=stderr_log,
-                            preexec_fn=os.setsid,
-                            shell=False if isinstance(running_ai_command, list) else True
-                        )
-                    logger.info(f"AI logs written to {ai_log_stdout} and {ai_log_stderr}")
+                    os.system(' '.join(running_ai_command))
                 except Exception as e:
                     logger.error(f"Error starting AI service: {str(e)}", exc_info=True)
                     return False
-        
                 if not self._wait_for_service(instance_port):
                     logger.error(f"Service failed to start within 600 seconds")
-                    if ai_process:
-                        ai_process.terminate()
-                    return False
-
+                    os.system('docker stop ' + unique_instance_id)
+                    return False    
             # start the FastAPI app in the background           
             uvicorn_command = [
                 "uvicorn",
