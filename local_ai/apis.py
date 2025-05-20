@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import multiprocessing
+import threading
 
 # Import schemas from schema.py (assumed to exist in your project)
 from local_ai.schema import (
@@ -116,6 +117,10 @@ class LoadBalancer:
         self.health_check_task = None
         self._instance_cache: Dict[str, float] = {}  # Cache for instance selection
         self._cache_ttl: float = 0.1  # Cache TTL in seconds
+        self.request_queue: asyncio.Queue = asyncio.Queue()
+        self.queue_workers: list = []
+        self._shutdown_event = asyncio.Event()
+        self._worker_count = 2  # You can tune this number
     
     def update_instances(self, service_metadata: Dict[str, Any]):
         """Update instances from service metadata"""
@@ -289,6 +294,44 @@ class LoadBalancer:
         check_tasks = [check_with_semaphore(instance) for instance in healthy_instances]
         await asyncio.gather(*check_tasks, return_exceptions=True)
     
+    def num_healthy_instances(self) -> int:
+        return len([i for i in self.instances.values() if i.healthy])
+
+    def num_processing_instances(self) -> int:
+        return len([i for i in self.instances.values() if i.healthy and i.is_processing])
+
+    async def start_queue_workers(self, client: httpx.AsyncClient):
+        self._shutdown_event.clear()
+        for _ in range(self._worker_count):
+            worker = asyncio.create_task(self._queue_worker(client))
+            self.queue_workers.append(worker)
+
+    async def stop_queue_workers(self):
+        self._shutdown_event.set()
+        for worker in self.queue_workers:
+            worker.cancel()
+        await asyncio.gather(*self.queue_workers, return_exceptions=True)
+        self.queue_workers.clear()
+
+    async def _queue_worker(self, client: httpx.AsyncClient):
+        while not self._shutdown_event.is_set():
+            try:
+                item = await self.request_queue.get()
+                if item is None:
+                    continue
+                (endpoint, method, data, retries, future) = item
+                try:
+                    result = await self._execute_request_internal(client, endpoint, method, data, retries)
+                    future.set_result(result)
+                except Exception as e:
+                    future.set_exception(e)
+                finally:
+                    self.request_queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Queue worker error: {e}")
+
     async def execute_request(
         self, 
         client: httpx.AsyncClient,
@@ -297,7 +340,30 @@ class LoadBalancer:
         data: Optional[Dict] = None,
         retries: int = MAX_RETRIES
     ) -> Tuple[Dict, BackendInstance]:
-        """Execute a request on the next available instance with improved error handling and optimized resource management"""
+        """Execute a request on the next available instance, queueing if all are busy"""
+        # Check if we need to queue
+        healthy_count = self.num_healthy_instances()
+        processing_count = self.num_processing_instances()
+        if healthy_count > 0 and processing_count >= healthy_count:
+            # All healthy instances are busy, queue the request
+            loop = asyncio.get_event_loop()
+            future = loop.create_future()
+            await self.request_queue.put((endpoint, method, data, retries, future))
+            result = await future
+            return result
+        else:
+            # Process immediately
+            return await self._execute_request_internal(client, endpoint, method, data, retries)
+
+    async def _execute_request_internal(
+        self, 
+        client: httpx.AsyncClient,
+        endpoint: str,
+        method: str = "POST",
+        data: Optional[Dict] = None,
+        retries: int = MAX_RETRIES
+    ) -> Tuple[Dict, BackendInstance]:
+        """Internal method for executing a request on the next available instance with improved error handling and optimized resource management"""
         if not self.instances:
             raise RuntimeError("No backend instances available")
 
@@ -404,7 +470,7 @@ load_balancer = LoadBalancer()
 
 @app.on_event("startup")
 async def startup_event():
-    """Startup event handler: initialize the HTTP client and start health checks"""
+    """Startup event handler: initialize the HTTP client and start health checks and queue workers"""
     limits = httpx.Limits(
         max_connections=POOL_CONNECTIONS,
         max_keepalive_connections=POOL_CONNECTIONS,
@@ -421,14 +487,15 @@ async def startup_event():
         follow_redirects=True,
         max_redirects=5
     )
-    
     await load_balancer.start_health_check(app.state.client)
-    logger.info("Service started successfully with HTTP/2 support")
+    await load_balancer.start_queue_workers(app.state.client)
+    logger.info("Service started successfully with HTTP/2 support and queue workers")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources when the application shuts down"""
     await load_balancer.stop_health_check()
+    await load_balancer.stop_queue_workers()
     await app.state.client.aclose()
     logger.info("Service shutdown complete")
 
