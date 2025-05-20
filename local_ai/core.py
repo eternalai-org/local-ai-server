@@ -477,7 +477,7 @@ class LocalAIManager:
         # mount the model folder to the container
         command = [
             "docker", "run", "-d",
-            "--gpus", f"device={','.join(map(str, gpu_indices))}",
+            "--gpus", f"'\"device={','.join(map(str, gpu_indices))}\"'",
             "--name", instance_id,
             "-v", f"{model_folder}:{mounted_model_dir}",
             "--init", "--rm",

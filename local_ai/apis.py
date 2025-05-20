@@ -642,7 +642,7 @@ async def chat_completions(request: ChatCompletionRequest):
             )
     else:
         # Non-streaming request
-        print("Non-streaming request")
+        logger.info("Non-streaming request")
         response_data, instance = await load_balancer.execute_request(
             app.state.client,
             "/v1/chat/completions",
