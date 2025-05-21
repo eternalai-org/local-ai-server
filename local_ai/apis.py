@@ -174,6 +174,7 @@ class LoadBalancer:
     def update_instances(self, service_metadata: Dict[str, Any]):
         """Update instances from service metadata"""
         instances = service_metadata.get("instances", [])
+        logger.info(f"Updating instances: {instances}")
         new_instances = {}
         
         for instance_info in instances:
@@ -181,9 +182,12 @@ class LoadBalancer:
             port = instance_info.get("port")
             
             if instance_id and port:
+                logger.info(f"Adding instance {instance_id} on port {port}")
                 if instance_id in self.instances:
+                    logger.info(f"Instance {instance_id} already exists, updating port")
                     new_instances[instance_id] = self.instances[instance_id]
                 else:
+                    logger.info(f"Adding new instance {instance_id} on port {port}")
                     new_instances[instance_id] = BackendInstance(
                         instance_id=instance_id,
                         port=port

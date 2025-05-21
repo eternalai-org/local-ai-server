@@ -275,8 +275,7 @@ class LocalAIManager:
                 "local_ai.apis:app",
                 "--host", host,
                 "--port", str(port),
-                "--log-level", "info",
-                "--workers", str(num_wrokers)
+                "--log-level", "info"
             ]
             logger.info(f"Starting process: {' '.join(uvicorn_command)}")
             # Create log files for stdout and stderr
