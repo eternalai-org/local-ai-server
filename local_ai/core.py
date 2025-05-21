@@ -331,7 +331,7 @@ class LocalAIManager:
 
     def get_running_model(self) -> Optional[str]:
         """
-        Get currently running model hash if the service is healthy.
+        Get currently running model hash if all service instances are healthy.
 
         Returns:
             Optional[str]: Running model hash or None if no healthy service exists.
@@ -348,29 +348,46 @@ class LocalAIManager:
             app_port = service_info.get("app_port")
             local_ai_port = service_info.get("port")
             context_length = service_info.get("context_length")
-            
-            # Check both services with minimal timeout
+            instances = service_info.get("instances", [])
+
+            # Check all instance health endpoints
+            all_healthy = True
+            unhealthy_ports = []
+            with requests.Session() as session:
+                for instance in instances:
+                    port = instance.get("port")
+                    if not port:
+                        all_healthy = False
+                        unhealthy_ports.append(None)
+                        continue
+                    try:
+                        resp = session.get(f"http://localhost:{port}/health", timeout=2)
+                        if resp.status_code != 200:
+                            all_healthy = False
+                            unhealthy_ports.append(port)
+                    except requests.exceptions.RequestException:
+                        all_healthy = False
+                        unhealthy_ports.append(port)
+
+            # Also check the main API and local_ai ports for backward compatibility
             local_ai_healthy = False
             api_healthy = False
-            
-            # Use a single session for connection pooling
             with requests.Session() as session:
                 try:
                     local_ai_status = session.get(f"http://localhost:{local_ai_port}/health", timeout=2)
                     local_ai_healthy = local_ai_status.status_code == 200
                 except requests.exceptions.RequestException:
                     pass
-            
                 try:
                     app_status = session.get(f"http://localhost:{app_port}/v1/health", timeout=2)
                     api_healthy = app_status.status_code == 200
                 except requests.exceptions.RequestException:
                     pass
 
-            if local_ai_healthy and api_healthy:
+            if all_healthy and local_ai_healthy and api_healthy:
                 return model_hash
-                
-            logger.warning(f"Service not healthy: Local AI {local_ai_healthy}, API {api_healthy}")
+
+            logger.warning(f"Service not healthy: Instances unhealthy at ports {unhealthy_ports}, Local AI {local_ai_healthy}, API {api_healthy}")
             self.stop()  
             try:
                 logger.info("Restarting service...")  
