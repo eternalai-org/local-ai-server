@@ -268,13 +268,15 @@ class LocalAIManager:
                     logger.error(f"Service failed to start within 600 seconds")
                     os.system('docker stop ' + unique_instance_id)
                     return False    
-            # start the FastAPI app in the background           
+            # start the FastAPI app in the background       
+            num_wrokers = len(service_metadata["instances"])    
             uvicorn_command = [
                 "uvicorn",
                 "local_ai.apis:app",
                 "--host", host,
                 "--port", str(port),
-                "--log-level", "info"
+                "--log-level", "info",
+                "--workers", str(num_wrokers)
             ]
             logger.info(f"Starting process: {' '.join(uvicorn_command)}")
             # Create log files for stdout and stderr
