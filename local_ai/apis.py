@@ -546,10 +546,7 @@ async def startup_event():
             retries=MAX_RETRIES,
             verify=False
         ),
-        http2=True,
-        max_connections=POOL_CONNECTIONS,
-        max_keepalive_connections=POOL_CONNECTIONS,
-        keepalive_expiry=POOL_KEEPALIVE
+        http2=True
     )
     await load_balancer.start_health_check(app.state.client)
     await load_balancer.start_queue_workers(app.state.client)
