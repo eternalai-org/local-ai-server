@@ -503,7 +503,11 @@ async def shutdown_event():
 @app.get("/v1/health")
 async def health():
     """Health check endpoint"""
-    stats = load_balancer.get_stats()
+    stats = {}
+    try:
+        stats = load_balancer.get_stats()
+    except:
+        logger.error("Get stats failed")
     return {
         "status": "ok", 
         "stats": stats
