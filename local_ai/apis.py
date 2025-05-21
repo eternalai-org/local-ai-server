@@ -28,7 +28,6 @@ from local_ai.schema import (
     EmbeddingResponse
 )
 
-
 class ErrorHandlingStreamHandler(logging.StreamHandler):
     """Custom stream handler that handles I/O errors gracefully"""
     def emit(self, record):
@@ -87,17 +86,17 @@ app.add_middleware(
 )
 
 # Constants
-POOL_CONNECTIONS = min(multiprocessing.cpu_count() * 100, 1000)  # Cap at 1000 connections
+POOL_CONNECTIONS = min(multiprocessing.cpu_count() * 200, 2000)  # Increased for better concurrency
 POOL_KEEPALIVE = 120  # Increased keepalive time
 HTTP_TIMEOUT = 60.0  # Increased timeout for large requests
 STREAM_TIMEOUT = 600.0  # Increased for long-running streams
-MAX_RETRIES = 1  # Reduced retries for faster failure detection
-RETRY_DELAY = 1.0
-HEALTH_CHECK_INTERVAL = 30  # Increased for reduced overhead
-MAX_RESPONSE_TIME_WINDOW = 100  # Increased window for better metrics
+MAX_RETRIES = 5  # Increased retries for better reliability
+RETRY_DELAY = 1.0  # Increased delay between retries
+HEALTH_CHECK_INTERVAL = 15  # More frequent health checks
+MAX_RESPONSE_TIME_WINDOW = 200  # Larger window for better metrics
 MAX_QUEUE_SIZE = 1000  # Maximum number of queued requests
 MAX_WORKERS = min(multiprocessing.cpu_count() * 4, 32)  # Scale workers with CPU cores
-
+BACKOFF_FACTOR = 1.5  # Exponential backoff factor for retries
 
 class BackendInstance(BaseModel):
     """Model for a backend server instance"""
@@ -164,17 +163,20 @@ class LoadBalancer:
         self.health_check_interval = health_check_interval
         self.lock = asyncio.Lock()
         self.health_check_task = None
-        self._instance_cache: Dict[str, float] = {}  # Cache for instance selection
-        self._cache_ttl: float = 0.1  # Cache TTL in seconds
+        self._instance_cache: Dict[str, float] = {}
+        self._cache_ttl: float = 0.1
         self.request_queue: asyncio.Queue = asyncio.Queue(maxsize=MAX_QUEUE_SIZE)
         self.queue_workers: list = []
         self._shutdown_event = asyncio.Event()
-        self._worker_count = MAX_WORKERS  # You can tune this number
+        self._worker_count = MAX_WORKERS
+        self._active_requests = 0
+        self._max_concurrent_requests = POOL_CONNECTIONS
+        self._request_semaphore = asyncio.Semaphore(self._max_concurrent_requests)
+        self._backoff_times: Dict[str, float] = {}
     
     def update_instances(self, service_metadata: Dict[str, Any]):
         """Update instances from service metadata"""
         instances = service_metadata.get("instances", [])
-        logger.info(f"Updating instances: {instances}")
         new_instances = {}
         
         for instance_info in instances:
@@ -182,12 +184,9 @@ class LoadBalancer:
             port = instance_info.get("port")
             
             if instance_id and port:
-                logger.info(f"Adding instance {instance_id} on port {port}")
                 if instance_id in self.instances:
-                    logger.info(f"Instance {instance_id} already exists, updating port")
                     new_instances[instance_id] = self.instances[instance_id]
                 else:
-                    logger.info(f"Adding new instance {instance_id} on port {port}")
                     new_instances[instance_id] = BackendInstance(
                         instance_id=instance_id,
                         port=port
@@ -393,20 +392,38 @@ class LoadBalancer:
         data: Optional[Dict] = None,
         retries: int = MAX_RETRIES
     ) -> Tuple[Dict, BackendInstance]:
-        """Execute a request on the next available instance, queueing if all are busy"""
-        # Check if we need to queue
-        healthy_count = self.num_healthy_instances()
-        processing_count = self.num_processing_instances()
-        if healthy_count > 0 and processing_count >= healthy_count:
-            # All healthy instances are busy, queue the request
-            loop = asyncio.get_event_loop()
-            future = loop.create_future()
-            await self.request_queue.put((endpoint, method, data, retries, future))
-            result = await future
-            return result
-        else:
-            # Process immediately
-            return await self._execute_request_internal(client, endpoint, method, data, retries)
+        """Execute a request with improved concurrency control and backoff"""
+        async with self._request_semaphore:
+            self._active_requests += 1
+            try:
+                # Check if we need to queue
+                healthy_count = self.num_healthy_instances()
+                processing_count = self.num_processing_instances()
+                
+                if healthy_count > 0 and processing_count >= healthy_count:
+                    if self.request_queue.qsize() >= MAX_QUEUE_SIZE:
+                        raise HTTPException(
+                            status_code=503,
+                            detail="Service temporarily overloaded. Please try again later."
+                        )
+                    
+                    # Queue the request with exponential backoff
+                    loop = asyncio.get_event_loop()
+                    future = loop.create_future()
+                    await self.request_queue.put((endpoint, method, data, retries, future))
+                    
+                    try:
+                        result = await asyncio.wait_for(future, timeout=HTTP_TIMEOUT)
+                        return result
+                    except asyncio.TimeoutError:
+                        raise HTTPException(
+                            status_code=504,
+                            detail="Request timed out while waiting in queue"
+                        )
+                else:
+                    return await self._execute_request_internal(client, endpoint, method, data, retries)
+            finally:
+                self._active_requests -= 1
 
     async def _execute_request_internal(
         self, 
@@ -416,32 +433,38 @@ class LoadBalancer:
         data: Optional[Dict] = None,
         retries: int = MAX_RETRIES
     ) -> Tuple[Dict, BackendInstance]:
-        """Internal method for executing a request on the next available instance with improved error handling and optimized resource management"""
+        """Internal method with improved error handling and backoff strategy"""
         if not self.instances:
-            raise RuntimeError("No backend instances available")
+            raise HTTPException(
+                status_code=503,
+                detail="No backend instances available"
+            )
 
-        # Track attempted instances and errors
         tried_instances: Set[str] = set()
         last_error = None
         selected_instance = None
 
         for attempt in range(retries):
             try:
-                # Get next available instance
                 instance = await self.get_next_instance()
                 if not instance or instance.instance_id in tried_instances:
                     continue
+
+                # Apply backoff if instance had recent errors
+                if instance.instance_id in self._backoff_times:
+                    backoff_time = self._backoff_times[instance.instance_id]
+                    if time.time() < backoff_time:
+                        continue
+                    else:
+                        del self._backoff_times[instance.instance_id]
 
                 tried_instances.add(instance.instance_id)
                 selected_instance = instance
                 url = f"http://localhost:{instance.port}{endpoint}"
 
-                # Mark instance as busy
                 async with self.lock:
                     instance.is_processing = True
-                    logger.debug(f"Instance {instance.instance_id} marked as busy for {endpoint}")
 
-                # Execute request
                 start_time = time.time()
                 try:
                     if method.upper() == "POST":
@@ -449,7 +472,6 @@ class LoadBalancer:
                     else:
                         response = await client.get(url, timeout=HTTP_TIMEOUT)
 
-                    # Process response
                     duration = time.time() - start_time
                     async with self.lock:
                         instance.record_success()
@@ -457,12 +479,13 @@ class LoadBalancer:
 
                     if response.status_code >= 400:
                         error_text = response.text
-                        logger.warning(f"Request failed: {response.status_code} - {error_text}")
-
                         if response.status_code >= 500:
                             async with self.lock:
                                 instance.record_error()
                                 instance.is_processing = False
+                                # Apply exponential backoff
+                                backoff_time = time.time() + (RETRY_DELAY * (BACKOFF_FACTOR ** attempt))
+                                self._backoff_times[instance.instance_id] = backoff_time
                             continue
 
                         raise HTTPException(
@@ -472,51 +495,37 @@ class LoadBalancer:
 
                     result = response.json()
 
-                    # Update instance state for non-streaming requests
                     if data and isinstance(data, dict) and not data.get("stream", False):
                         async with self.lock:
                             instance.is_processing = False
-                            logger.debug(f"Instance {instance.instance_id} marked as available")
 
                     return result, instance
 
-                except httpx.TimeoutException as e:
-                    logger.warning(f"Request timeout for {url}: {str(e)}")
-                    last_error = e
-                    async with self.lock:
-                        instance.record_error()
-                        instance.is_processing = False
-                    continue
-
-                except httpx.RequestError as e:
+                except (httpx.TimeoutException, httpx.RequestError) as e:
                     logger.warning(f"Request failed for {url}: {str(e)}")
                     last_error = e
                     async with self.lock:
                         instance.record_error()
                         instance.is_processing = False
-                    continue
-
-                except Exception as e:
-                    logger.error(f"Unexpected error for {url}: {str(e)}")
-                    last_error = e
-                    async with self.lock:
-                        instance.record_error()
-                        instance.is_processing = False
+                        # Apply exponential backoff
+                        backoff_time = time.time() + (RETRY_DELAY * (BACKOFF_FACTOR ** attempt))
+                        self._backoff_times[instance.instance_id] = backoff_time
                     continue
 
             except Exception as e:
                 logger.error(f"Error in request execution: {str(e)}")
                 last_error = e
                 if attempt < retries - 1:
-                    await asyncio.sleep(min(2 ** attempt * RETRY_DELAY, 2.0))
+                    await asyncio.sleep(min(RETRY_DELAY * (BACKOFF_FACTOR ** attempt), 10.0))
 
-        # Cleanup if all retries failed
         if selected_instance:
             async with self.lock:
                 selected_instance.is_processing = False
-                logger.warning(f"Instance {selected_instance.instance_id} marked as available after all retries failed")
 
-        raise RuntimeError(f"All requests failed after {retries} attempts. Last error: {str(last_error)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"All requests failed after {retries} attempts. Last error: {str(last_error)}"
+        )
 
 # Initialize load balancer
 load_balancer = LoadBalancer()
@@ -536,9 +545,7 @@ async def startup_event():
             retries=MAX_RETRIES,
             verify=False
         ),
-        http2=True,  # Enable HTTP/2 for the client
-        follow_redirects=True,
-        max_redirects=5
+        http2=True
     )
     await load_balancer.start_health_check(app.state.client)
     await load_balancer.start_queue_workers(app.state.client)
@@ -556,10 +563,8 @@ async def shutdown_event():
 @app.get("/v1/health")
 async def health():
     """Health check endpoint"""
-    stats = load_balancer.get_stats()
     return {
-        "status": "ok", 
-        "stats": stats
+        "status": "ok"
     }
 
 @app.post("/update")

@@ -269,7 +269,6 @@ class LocalAIManager:
                     os.system('docker stop ' + unique_instance_id)
                     return False    
             # start the FastAPI app in the background       
-            num_wrokers = len(service_metadata["instances"])    
             uvicorn_command = [
                 "uvicorn",
                 "local_ai.apis:app",
