@@ -13,7 +13,6 @@ setup(
     },
     include_package_data=True,
     install_requires=[
-        "httpx[http2]",
         "nvidia-ml-py3",
         "requests>=2.28.0",
         "tqdm>=4.64.0",

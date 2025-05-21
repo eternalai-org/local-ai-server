@@ -483,9 +483,7 @@ async def startup_event():
             retries=MAX_RETRIES,
             verify=False
         ),
-        http2=True,  # Enable HTTP/2 for the client
-        follow_redirects=True,
-        max_redirects=5
+        http2=False,
     )
     await load_balancer.start_health_check(app.state.client)
     await load_balancer.start_queue_workers(app.state.client)
@@ -503,14 +501,8 @@ async def shutdown_event():
 @app.get("/v1/health")
 async def health():
     """Health check endpoint"""
-    stats = {}
-    try:
-        stats = load_balancer.get_stats()
-    except:
-        logger.error("Get stats failed")
     return {
-        "status": "ok", 
-        "stats": stats
+        "status": "ok"
     }
 
 @app.post("/update")
