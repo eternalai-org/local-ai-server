@@ -346,7 +346,6 @@ class LocalAIManager:
             
             model_hash = service_info.get("hash")
             app_port = service_info.get("app_port")
-            local_ai_port = service_info.get("port")
             context_length = service_info.get("context_length")
             instances = service_info.get("instances", [])
 
@@ -370,24 +369,18 @@ class LocalAIManager:
                         unhealthy_ports.append(port)
 
             # Also check the main API and local_ai ports for backward compatibility
-            local_ai_healthy = False
             api_healthy = False
             with requests.Session() as session:
-                try:
-                    local_ai_status = session.get(f"http://localhost:{local_ai_port}/health", timeout=2)
-                    local_ai_healthy = local_ai_status.status_code == 200
-                except requests.exceptions.RequestException:
-                    pass
                 try:
                     app_status = session.get(f"http://localhost:{app_port}/v1/health", timeout=2)
                     api_healthy = app_status.status_code == 200
                 except requests.exceptions.RequestException:
                     pass
 
-            if all_healthy and local_ai_healthy and api_healthy:
+            if all_healthy and api_healthy:
                 return model_hash
 
-            logger.warning(f"Service not healthy: Instances unhealthy at ports {unhealthy_ports}, Local AI {local_ai_healthy}, API {api_healthy}")
+            logger.warning(f"Service not healthy: Instances unhealthy at ports {unhealthy_ports}, API {api_healthy}")
             self.stop()  
             try:
                 logger.info("Restarting service...")  
