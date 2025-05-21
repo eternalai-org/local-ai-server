@@ -309,16 +309,25 @@ class LocalAIManager:
 
             self._dump_running_service(service_metadata)    
 
-            # update service metadata to the FastAPI app
-            try:
-                update_url = f"http://localhost:{port}/update"
-                response = requests.post(update_url, json=service_metadata, timeout=10)
-                response.raise_for_status()  # Raise exception for HTTP error responses
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Failed to update service metadata: {str(e)}")
-                # Stop the partially started service
-                self.stop()
-                return False
+            # update service metadata to the FastAPI app with retries
+            max_retries = 5
+            retry_delay = 2
+            for attempt in range(max_retries):
+                try:
+                    update_url = f"http://localhost:{port}/update"
+                    response = requests.post(update_url, json=service_metadata, timeout=10)
+                    response.raise_for_status()  # Raise exception for HTTP error responses
+                    logger.info("Successfully updated service metadata")
+                    break
+                except requests.exceptions.RequestException as e:
+                    if attempt == max_retries - 1:  # Last attempt
+                        logger.error(f"Failed to update service metadata after {max_retries} attempts: {str(e)}")
+                        # Stop the partially started service
+                        self.stop()
+                        return False
+                    logger.warning(f"Attempt {attempt + 1} to update service metadata failed: {str(e)}")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
             
             return True
 
