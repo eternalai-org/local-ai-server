@@ -372,7 +372,7 @@ class LocalAIManager:
             api_healthy = False
             with requests.Session() as session:
                 try:
-                    app_status = session.get(f"http://localhost:{app_port}/v1/health", timeout=2)
+                    app_status = session.get(f"http://localhost:{app_port}/health", timeout=2)
                     api_healthy = app_status.status_code == 200
                 except requests.exceptions.RequestException:
                     pass
