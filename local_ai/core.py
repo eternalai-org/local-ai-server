@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any
 import pkg_resources
 from local_ai.nvidia import NvidiaGPUManager
 from local_ai.download import download_model_from_filecoin_async
+import socket
 
 class LocalAIServiceError(Exception):
     """Base exception for Local AI service errors."""
@@ -214,7 +215,8 @@ class LocalAIManager:
             service_metadata["instances"] = []
 
             for start_gpu_index in range(n_instances):
-                instance_port = port + start_gpu_index + 1
+                
+                instance_port = self._get_free_port()
 
                 available_gpu_indices = available_gpus[start_gpu_index * steps: (start_gpu_index + 1) * steps]
                 unique_instance_id = f"{hash}_{str(start_gpu_index).zfill(2)}"
@@ -522,3 +524,9 @@ class LocalAIManager:
                 logger.warning(f"Attempt {attempt+1} failed for {url}: {e}")
                 time.sleep(delay)
         return None
+
+    def _get_free_port(self):
+        """Get a random free port from the OS."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
