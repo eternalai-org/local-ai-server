@@ -55,6 +55,13 @@ for existing_handler in logger.handlers[:]:
     if not isinstance(existing_handler, ErrorHandlingStreamHandler):
         logger.removeHandler(existing_handler)
 
+# Configure uvicorn access logger with error handling
+uvicorn_access_logger = logging.getLogger("uvicorn.access")
+uvicorn_access_logger.handlers = []  # Remove existing handlers
+uvicorn_access_handler = ErrorHandlingStreamHandler(sys.stderr)
+uvicorn_access_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+uvicorn_access_logger.addHandler(uvicorn_access_handler)
+
 app = FastAPI(
     title="Local AI API",
     description="API for local AI model inference with load balancing",
