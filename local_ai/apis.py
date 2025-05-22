@@ -581,6 +581,7 @@ async def update(request: dict):
     load_balancer.update_instances(request)
     return {"status": "ok", "message": "Service info updated successfully"}
 
+@app.post("/chat/completions")
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """Chat completion endpoint with load balancing"""
@@ -789,6 +790,7 @@ async def chat_completions(request: ChatCompletionRequest):
             choices=response_data.get("choices", [])
         )
 
+@app.post("/embeddings")
 @app.post("/v1/embeddings")
 async def embeddings(request: EmbeddingRequest):
     """Embeddings endpoint with load balancing"""
