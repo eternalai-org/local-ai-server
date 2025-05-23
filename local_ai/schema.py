@@ -130,7 +130,7 @@ class ChatTemplateKwargs(BaseModel):
     """
     Represents the arguments for a chat template.
     """
-    enable_thinking: bool = Field(False, description="Whether to enable thinking mode")
+    enable_thinking: bool = Field(True, description="Whether to enable thinking mode")
 
 # Non-streaming request and response
 class ChatCompletionRequest(ChatCompletionRequestBase):
