@@ -66,7 +66,7 @@ fi
 
 # Step 5: Pull llama-server cuda image
 log_message "Pulling llama-server cuda image..."
-docker pull ghcr.io/ggerganov/llama.cpp:server-cuda
+docker pull lmsysorg/sglang:latest
 
 # Step 6: Create and activate virtual environment
 log_message "Creating virtual environment 'local_ai'..."

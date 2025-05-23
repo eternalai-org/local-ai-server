@@ -7,8 +7,6 @@ from typing_extensions import Literal
 from pydantic import BaseModel, Field, validator, root_validator
 from typing import List, Dict, Optional, Union, Any, ClassVar
 
-# Precompile regex patterns for better performance
-UNICODE_BOX_PATTERN = re.compile(r'\\u25[0-9a-fA-F]{2}')
 
 # Configuration
 class Config:
@@ -126,6 +124,12 @@ class ChatCompletionRequestBase(BaseModel):
         
         logger.debug("No images detected, treating as text-only request")
         return False
+    
+class ChatTemplateArgs(BaseModel):
+    """
+    Represents the arguments for a chat template.
+    """
+    enable_thinking: bool = Field(False, description="Whether to enable thinking mode")
 
 # Non-streaming request and response
 class ChatCompletionRequest(ChatCompletionRequestBase):
@@ -133,35 +137,7 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
     Model for non-streaming chat completion requests.
     """
     stream: bool = Field(False, description="Whether to stream the response")
-    enable_thinking: bool = Field(False, description="Whether to enable thinking mode")
-
-    def fix_messages(self) -> None:
-        """Fix the messages list to ensure proper formatting and ordering."""
-        def clean_special_box_text(input_text: str) -> str:
-            return UNICODE_BOX_PATTERN.sub('', input_text).strip()
-        
-        # Clean message contents
-        for message in self.messages:
-            if message.content is None:
-                message.content = ""
-            elif isinstance(message.content, str):
-                message.content = clean_special_box_text(message.content)
-            elif isinstance(message.content, list):
-                for item in message.content:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        item["text"] = clean_special_box_text(item.get("text", ""))
-        
-        # Sort messages by role
-        system_messages = []
-        non_system_messages = []
-        
-        for message in self.messages:
-            if message.role == "system":
-                system_messages.append(message)
-            else:
-                non_system_messages.append(message)
-            
-        self.messages = system_messages + non_system_messages
+    chat_template_args: ChatTemplateArgs = Field(ChatTemplateArgs(), description="Arguments for the chat template")
 
 class Choice(BaseModel):
     """
