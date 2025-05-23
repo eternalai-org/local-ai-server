@@ -348,44 +348,43 @@ async def health():
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """Handle chat completion requests"""
-    async with httpx.AsyncClient() as client:
-        try:
-            request.model = CONFIG["model"]["id"]
-            if request.stream:
-                async def stream_generator():
-                    try:
-                        response, instance = await load_balancer.execute_request(
-                            client,
-                            "/v1/chat/completions",
-                            data=request.dict()
-                        )
-                        
-                        async for chunk in response:
-                            if isinstance(chunk, dict):
-                                yield f"data: {json.dumps(chunk)}\n\n"
-                            else:
-                                yield f"data: {chunk}\n\n"
-                        yield "data: [DONE]\n\n"
-                    except Exception as e:
-                        logger.error(f"Error in stream: {str(e)}")
-                        yield f"data: {json.dumps({'error': str(e)})}\n\n"
-                        yield "data: [DONE]\n\n"
+    try:
+        request.model = CONFIG["model"]["id"]
+        if request.stream:
+            async def stream_generator():
+                try:
+                    response, instance = await load_balancer.execute_request(
+                        request.app.state.client,
+                        "/v1/chat/completions",
+                        data=request.dict()
+                    )
+                    
+                    async for chunk in response:
+                        if isinstance(chunk, dict):
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                        else:
+                            yield f"data: {chunk}\n\n"
+                    yield "data: [DONE]\n\n"
+                except Exception as e:
+                    logger.error(f"Error in stream: {str(e)}")
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    yield "data: [DONE]\n\n"
 
-                return StreamingResponse(
-                    stream_generator(),
-                    media_type="text/event-stream"
-                )
-            else:
-                response, instance = await load_balancer.execute_request(
-                    client,
-                    "/v1/chat/completions",
-                    data=request.dict()
-                )
-                return response
+            return StreamingResponse(
+                stream_generator(),
+                media_type="text/event-stream"
+            )
+        else:
+            response, instance = await load_balancer.execute_request(
+                request.app.state.client,
+                "/v1/chat/completions",
+                data=request.dict()
+            )
+            return response
 
-        except Exception as e:
-            logger.error(f"Error processing chat completion: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error processing chat completion: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Add middleware for request timing
 @app.middleware("http")
