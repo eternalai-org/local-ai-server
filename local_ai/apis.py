@@ -179,27 +179,18 @@ class LoadBalancer:
         self.health_check_task = None
         self._instance_cache: Dict[str, float] = {}
         self._cache_ttl: float = 0.1
-    
-    def update_instances(self, service_metadata: Dict[str, Any]):
-        """Update instances from service metadata"""
-        instances = service_metadata.get("instances", [])
-        new_instances = {}
         
-        for instance_info in instances:
-            instance_id = instance_info.get("instance_id")
-            port = instance_info.get("port")
-            
-            if instance_id and port:
-                if instance_id in self.instances:
-                    new_instances[instance_id] = self.instances[instance_id]
-                else:
-                    new_instances[instance_id] = BackendInstance(
-                        instance_id=instance_id,
-                        port=port
-                    )
-        
-        self.instances = new_instances
-        logger.info(f"Updated instances: {len(self.instances)} instances available")
+        # Initialize instances from CONFIG
+        urls = CONFIG.get("urls", [])
+        for i, url in enumerate(urls):
+            # Extract port from URL (e.g., http://localhost:8080 -> 8080)
+            port = int(url.split(":")[-1])
+            instance_id = f"instance_{i}"
+            self.instances[instance_id] = BackendInstance(
+                instance_id=instance_id,
+                port=port
+            )
+        logger.info(f"Initialized {len(self.instances)} instances from config")
     
     async def start_health_check(self, client: httpx.AsyncClient):
         """Start the health check task"""
@@ -352,13 +343,6 @@ async def health():
     return {
         "status": "ok"
     }
-
-@app.post("/update")
-async def update(request: dict):
-    """Update the service information and load balancer instances"""
-    app.state.service_info = request
-    load_balancer.update_instances(request)
-    return {"status": "ok", "message": "Service info updated successfully"}
 
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
