@@ -143,8 +143,6 @@ class BackendInstance(BaseModel):
     error_count: int = 0
     response_times: List[float] = Field(default_factory=list)
     is_processing: bool = False
-    _last_status_check: float = 0
-    _status_cache_ttl: float = 1.0  # Cache status for 1 second
     
     def avg_response_time(self) -> float:
         """Calculate average response time or return max value if no data"""
@@ -171,27 +169,6 @@ class BackendInstance(BaseModel):
         if not self.healthy:
             self.healthy = True
             logger.info(f"Backend instance {self.instance_id} is now healthy again")
-            
-    async def check_processing_status(self, client: httpx.AsyncClient) -> bool:
-        """Check if the instance is currently processing a request with caching"""
-        current_time = time.time()
-        if current_time - self._last_status_check < self._status_cache_ttl:
-            return self.is_processing
-
-        try:
-            # Use proxy service to check status
-            response = await client.get(f"http://localhost:65534/v1/instances/{self.instance_id}/status", timeout=5.0)
-            if response.status_code == 200:
-                status_data = response.json()
-                self.is_processing = status_data.get("is_processing", False)
-                self._last_status_check = current_time
-                return self.is_processing
-            else:
-                logger.warning(f"Failed to get status data from proxy for instance {self.instance_id}: {response.status_code}")
-                return self.is_processing
-        except Exception as e:
-            logger.warning(f"Error checking processing status for instance {self.instance_id}: {str(e)}")
-            return self.is_processing
 
 class LoadBalancer:
     """Load balancer to distribute requests across multiple LLM server instances"""
@@ -202,7 +179,6 @@ class LoadBalancer:
         self.health_check_task = None
         self._instance_cache: Dict[str, float] = {}
         self._cache_ttl: float = 0.1
-        self.proxy_port = CONFIG.get('port', 65534)  # Get proxy port from config
     
     def update_instances(self, service_metadata: Dict[str, Any]):
         """Update instances from service metadata"""
@@ -258,7 +234,7 @@ class LoadBalancer:
         await asyncio.gather(*check_tasks, return_exceptions=True)
     
     async def _check_instance_health(self, client: httpx.AsyncClient, instance: BackendInstance):
-        """Check health of a single instance through proxy service"""
+        """Check health of a single instance directly"""
         current_time = time.time()
         if not instance.healthy and current_time - instance.last_checked < 60:
             return  # Skip check if unhealthy and checked within last 60 seconds
@@ -266,7 +242,7 @@ class LoadBalancer:
         try:
             start_time = time.time()
             response = await client.get(
-                f"http://localhost:{self.proxy_port}/v1/instances/{instance.instance_id}/health",
+                f"http://localhost:{instance.port}/health",
                 timeout=15.0
             )
             duration = time.time() - start_time
@@ -333,17 +309,17 @@ class LoadBalancer:
         data: Optional[Dict] = None,
         retries: int = MAX_RETRIES
     ) -> Tuple[Dict, BackendInstance]:
-        """Execute a request through the proxy service"""
+        """Execute a request directly to the selected instance"""
         instance = await self.get_next_instance()
         if not instance:
             raise HTTPException(status_code=503, detail="No healthy instances available")
 
         start_time = time.time()
         try:
-            # Forward request to proxy service
+            # Send request directly to the instance
             response = await client.request(
                 method,
-                f"http://localhost:{self.proxy_port}{endpoint}",
+                f"http://localhost:{instance.port}{endpoint}",
                 json=data,
                 timeout=HTTP_TIMEOUT
             )
@@ -440,6 +416,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "local_ai.apis:app",
         host="0.0.0.0",
-        port=CONFIG["proxy_port"],
-        workers=CONFIG["workers"]
+        port=CONFIG.get("proxy_port", 65534),
+        workers=CONFIG.get("workers", 1)
     )
