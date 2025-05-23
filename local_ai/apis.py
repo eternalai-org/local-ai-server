@@ -437,4 +437,10 @@ async def add_process_time_header(request: Request, call_next):
     return response
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=CONFIG["proxy_port"], workers=CONFIG["workers"])
+    uvicorn.run(
+        "local_ai.apis:app",
+        host="0.0.0.0",
+        port=CONFIG["proxy_port"],
+        workers=CONFIG["workers"],
+        reload=True
+    )
