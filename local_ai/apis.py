@@ -338,10 +338,10 @@ async def chat_completions(request: Request, chat_request: ChatCompletionRequest
                             while '\n' in buffer:
                                 line, buffer = buffer.split('\n', 1)
                                 if line.strip():
-                                    yield f"data: {line}\n\n"
+                                    yield f"{line}\n\n"
                         if buffer.strip():
-                            yield f"data: {buffer}\n\n"
-                        yield "data: [DONE]\n\n"
+                            yield f"{buffer}\n\n"
+                            
                 except Exception as e:
                     logger.error(f"Error in stream: {str(e)}")
                     error_msg = {"error": {"message": str(e), "code": 500}}
