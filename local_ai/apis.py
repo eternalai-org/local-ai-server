@@ -310,7 +310,7 @@ class LoadBalancer:
             # Send request directly to the instance
             response = await client.request(
                 method,
-                f"{instance.url}/{endpoint}",
+                f"{instance.url}{endpoint}",
                 json=data,
                 timeout=HTTP_TIMEOUT
             )
