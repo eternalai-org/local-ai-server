@@ -137,7 +137,7 @@ BACKOFF_FACTOR = 1.5  # Exponential backoff factor for retries
 class BackendInstance(BaseModel):
     """Model for a backend server instance"""
     instance_id: str
-    port: int
+    url: str
     healthy: bool = True
     last_checked: float = Field(default_factory=time.time)
     error_count: int = 0
@@ -183,12 +183,10 @@ class LoadBalancer:
         # Initialize instances from CONFIG
         urls = CONFIG.get("urls", [])
         for i, url in enumerate(urls):
-            # Extract port from URL (e.g., http://localhost:8080 -> 8080)
-            port = int(url.split(":")[-1])
             instance_id = f"instance_{i}"
             self.instances[instance_id] = BackendInstance(
                 instance_id=instance_id,
-                port=port
+                url=url
             )
         logger.info(f"Initialized {len(self.instances)} instances from config")
     
@@ -233,7 +231,7 @@ class LoadBalancer:
         try:
             start_time = time.time()
             response = await client.get(
-                f"http://localhost:{instance.port}/health",
+                f"{instance.url}/health",
                 timeout=15.0
             )
             duration = time.time() - start_time
@@ -310,7 +308,7 @@ class LoadBalancer:
             # Send request directly to the instance
             response = await client.request(
                 method,
-                f"http://localhost:{instance.port}/{endpoint}",
+                f"{instance.url}/{endpoint}",
                 json=data,
                 timeout=HTTP_TIMEOUT
             )
