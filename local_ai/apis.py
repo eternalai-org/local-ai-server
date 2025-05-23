@@ -346,17 +346,17 @@ async def health():
 
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest):
+async def chat_completions(request: Request, chat_request: ChatCompletionRequest):
     """Handle chat completion requests"""
     try:
-        request.model = CONFIG["model"]["id"]
-        if request.stream:
+        chat_request.model = CONFIG["model"]["id"]
+        if chat_request.stream:
             async def stream_generator():
                 try:
                     response, instance = await load_balancer.execute_request(
                         request.app.state.client,
                         "/v1/chat/completions",
-                        data=request.dict()
+                        data=chat_request.dict()
                     )
                     
                     async for chunk in response:
@@ -378,7 +378,7 @@ async def chat_completions(request: ChatCompletionRequest):
             response, instance = await load_balancer.execute_request(
                 request.app.state.client,
                 "/v1/chat/completions",
-                data=request.dict()
+                data=chat_request.dict()
             )
             return response
 
