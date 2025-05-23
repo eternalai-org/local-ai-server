@@ -85,14 +85,14 @@ class ChatCompletionRequestBase(BaseModel):
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Available tools for the model")
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice configuration")
     max_tokens: Optional[int] = Field(4096, ge=1, description="Maximum number of tokens to generate")
-    temperature: Optional[float] = Field(0.6, ge=0, le=2, description="Sampling temperature")
-    top_p: Optional[float] = Field(0.95, ge=0, le=1, description="Nucleus sampling parameter")
+    temperature: Optional[float] = Field(0.7, ge=0, le=2, description="Sampling temperature")
+    top_p: Optional[float] = Field(0.8, ge=0, le=1, description="Nucleus sampling parameter")
     top_k: Optional[int] = Field(20, ge=1, le=100, description="Top-k sampling parameter")
     min_p: Optional[float] = Field(0.0, ge=0, le=1, description="Minimum probability parameter")
     frequency_penalty: Optional[float] = Field(0.0, ge=-2, le=2, description="Frequency penalty")
     presence_penalty: Optional[float] = Field(1.5, ge=-2, le=2, description="Presence penalty")
     stop: Optional[List[str]] = Field(None, description="Stop sequences")
-    seed: Optional[int] = Field(42, description="Random seed for generation")
+    seed: Optional[int] = Field(0, description="Random seed for generation")
     json_schema: Optional[Dict[str, Any]] = Field(None, description="JSON schema for the response")
 
     @validator("messages")
@@ -130,7 +130,7 @@ class ChatTemplateKwargs(BaseModel):
     """
     Represents the arguments for a chat template.
     """
-    enable_thinking: bool = Field(True, description="Whether to enable thinking mode")
+    enable_thinking: bool = Field(False, description="Whether to enable thinking mode")
 
 # Non-streaming request and response
 class ChatCompletionRequest(ChatCompletionRequestBase):
