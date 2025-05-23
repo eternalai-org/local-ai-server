@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 import multiprocessing
 import sys
 from local_ai import CONFIG
+from contextlib import asynccontextmanager
 
 # Import schemas from schema.py (assumed to exist in your project)
 from local_ai.schema import (
@@ -60,10 +61,39 @@ uvicorn_access_handler = ErrorHandlingStreamHandler(sys.stderr)
 uvicorn_access_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 uvicorn_access_logger.addHandler(uvicorn_access_handler)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events"""
+    # Startup
+    limits = httpx.Limits(
+        max_connections=POOL_CONNECTIONS,
+        max_keepalive_connections=POOL_CONNECTIONS,
+        keepalive_expiry=POOL_KEEPALIVE
+    )
+    app.state.client = httpx.AsyncClient(
+        limits=limits,
+        timeout=HTTP_TIMEOUT,
+        transport=httpx.AsyncHTTPTransport(
+            retries=MAX_RETRIES,
+            verify=False
+        ),
+        http2=True
+    )
+    await load_balancer.start_health_check(app.state.client)
+    logger.info("Service started successfully with HTTP/2 support")
+    
+    yield
+    
+    # Shutdown
+    await load_balancer.stop_health_check()
+    await app.state.client.aclose()
+    logger.info("Service shutdown complete")
+
 app = FastAPI(
-    title="Local AI API",
-    description="API for local AI model inference with load balancing",
-    version="0.0.1",
+    title="EternalAI Server",
+    description="Server for AI model inference with load balancing",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 # Configure CORS
@@ -337,33 +367,6 @@ class LoadBalancer:
 
 # Initialize load balancer
 load_balancer = LoadBalancer()
-
-@app.on_event("startup")
-async def startup_event():
-    """Startup event handler: initialize the HTTP client and start health checks"""
-    limits = httpx.Limits(
-        max_connections=POOL_CONNECTIONS,
-        max_keepalive_connections=POOL_CONNECTIONS,
-        keepalive_expiry=POOL_KEEPALIVE
-    )
-    app.state.client = httpx.AsyncClient(
-        limits=limits,
-        timeout=HTTP_TIMEOUT,
-        transport=httpx.AsyncHTTPTransport(
-            retries=MAX_RETRIES,
-            verify=False
-        ),
-        http2=True
-    )
-    await load_balancer.start_health_check(app.state.client)
-    logger.info("Service started successfully with HTTP/2 support")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up resources when the application shuts down"""
-    await load_balancer.stop_health_check()
-    await app.state.client.aclose()
-    logger.info("Service shutdown complete")
 
 @app.get("/health")
 @app.get("/v1/health")
