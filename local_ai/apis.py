@@ -182,8 +182,9 @@ class LoadBalancer:
         
         # Initialize instances from CONFIG
         urls = CONFIG.get("urls", [])
-        for i, url in enumerate(urls):
+        for i, url_info in enumerate(urls):
             # Get the URL string from the config
+            url = url_info["url"]  # URLs in config are dictionaries with "url" key
             instance_id = f"instance_{i}"
             self.instances[instance_id] = BackendInstance(
                 instance_id=instance_id,
