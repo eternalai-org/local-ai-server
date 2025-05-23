@@ -350,18 +350,14 @@ async def chat_completions(request: ChatCompletionRequest):
     """Handle chat completion requests"""
     async with httpx.AsyncClient() as client:
         try:
-            print(request)
-            dict_request = request.dict()
-            dict_request["model"] = CONFIG["model"]["id"]
-            print(dict_request)
-
+            request.model = CONFIG["model"]["id"]
             if request.stream:
                 async def stream_generator():
                     try:
                         response, instance = await load_balancer.execute_request(
                             client,
                             "/v1/chat/completions",
-                            data=dict_request
+                            data=request.dict()
                         )
                         
                         async for chunk in response:
@@ -383,7 +379,7 @@ async def chat_completions(request: ChatCompletionRequest):
                 response, instance = await load_balancer.execute_request(
                     client,
                     "/v1/chat/completions",
-                    data=dict_request
+                    data=request.dict()
                 )
                 return response
 

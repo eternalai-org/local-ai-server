@@ -125,7 +125,7 @@ class ChatCompletionRequestBase(BaseModel):
         logger.debug("No images detected, treating as text-only request")
         return False
     
-class ChatTemplateArgs(BaseModel):
+class ChatTemplateKwargs(BaseModel):
     """
     Represents the arguments for a chat template.
     """
@@ -137,7 +137,7 @@ class ChatCompletionRequest(ChatCompletionRequestBase):
     Model for non-streaming chat completion requests.
     """
     stream: bool = Field(False, description="Whether to stream the response")
-    chat_template_args: ChatTemplateArgs = Field(ChatTemplateArgs(), description="Arguments for the chat template")
+    chat_template_kwargs: ChatTemplateKwargs = Field(ChatTemplateKwargs(), description="Arguments for the chat template")
 
 class Choice(BaseModel):
     """
