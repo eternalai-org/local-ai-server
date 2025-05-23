@@ -350,9 +350,9 @@ async def chat_completions(request: ChatCompletionRequest):
     """Handle chat completion requests"""
     async with httpx.AsyncClient() as client:
         try:
+            print(request)
             dict_request = request.dict()
             dict_request["model"] = CONFIG["model"]["id"]
-
             print(dict_request)
 
             if request.stream:
