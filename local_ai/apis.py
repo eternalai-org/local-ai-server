@@ -126,7 +126,7 @@ POOL_CONNECTIONS = min(multiprocessing.cpu_count() * 200, 2000)  # Increased for
 POOL_KEEPALIVE = 120  # Increased keepalive time
 HTTP_TIMEOUT = 60.0  # Increased timeout for large requests
 STREAM_TIMEOUT = 600.0  # Increased for long-running streams
-MAX_RETRIES = 5  # Increased retries for better reliability
+MAX_RETRIES = 1  # Increased retries for better reliability
 RETRY_DELAY = 1.0  # Increased delay between retries
 HEALTH_CHECK_INTERVAL = 15  # More frequent health checks
 MAX_RESPONSE_TIME_WINDOW = 200  # Larger window for better metrics
@@ -350,13 +350,16 @@ async def chat_completions(request: ChatCompletionRequest):
     """Handle chat completion requests"""
     async with httpx.AsyncClient() as client:
         try:
+            dict_request = request.dict()
+            dict_request["model"] = CONFIG["model"]["id"]
+
             if request.stream:
                 async def stream_generator():
                     try:
                         response, instance = await load_balancer.execute_request(
                             client,
                             "/v1/chat/completions",
-                            data=request.dict()
+                            data=dict_request
                         )
                         
                         async for chunk in response:
@@ -378,7 +381,7 @@ async def chat_completions(request: ChatCompletionRequest):
                 response, instance = await load_balancer.execute_request(
                     client,
                     "/v1/chat/completions",
-                    data=request.dict()
+                    data=dict_request
                 )
                 return response
 
