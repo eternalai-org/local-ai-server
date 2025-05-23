@@ -1,8 +1,8 @@
 import sys
 import argparse
 from loguru import logger
-from local_ai import CONFIG
 from local_ai import __version__
+from local_ai.config import CONFIG
 from local_ai.utils import health_check
 
 
