@@ -353,6 +353,8 @@ async def chat_completions(request: ChatCompletionRequest):
             dict_request = request.dict()
             dict_request["model"] = CONFIG["model"]["id"]
 
+            print(dict_request)
+
             if request.stream:
                 async def stream_generator():
                     try:
