@@ -13,7 +13,7 @@ import json
 import random
 import uvicorn
 from typing import Dict, List, Optional, Tuple, Any, Set
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -21,6 +21,9 @@ import multiprocessing
 import sys
 from local_ai.config import CONFIG
 from contextlib import asynccontextmanager
+from functools import lru_cache
+from fastapi.middleware.ratelimit import RateLimitMiddleware
+import hashlib
 
 
 # Import schemas from schema.py (assumed to exist in your project)
@@ -133,6 +136,9 @@ MAX_RESPONSE_TIME_WINDOW = 200  # Larger window for better metrics
 MAX_QUEUE_SIZE = 1000  # Maximum number of queued requests
 MAX_WORKERS = min(multiprocessing.cpu_count() * 4, 32)  # Scale workers with CPU cores
 BACKOFF_FACTOR = 1.5  # Exponential backoff factor for retries
+CACHE_TTL = 300  # 5 minutes cache TTL
+MAX_BUFFER_SIZE = 8192  # 8KB buffer size
+RATE_LIMIT = "100/minute"  # Rate limit per minute
 
 class BackendInstance(BaseModel):
     """Model for a backend server instance"""
@@ -292,47 +298,6 @@ class LoadBalancer:
             
             return selected
 
-    async def execute_request(
-        self, 
-        client: httpx.AsyncClient,
-        endpoint: str,
-        method: str = "POST",
-        data: Optional[Dict] = None,
-        retries: int = MAX_RETRIES
-    ) -> Tuple[Dict, BackendInstance]:
-        """Execute a request directly to the selected instance"""
-        instance = await self.get_next_instance()
-        if not instance:
-            raise HTTPException(status_code=503, detail="No healthy instances available")
-
-        start_time = time.time()
-        try:
-            # Send request directly to the instance
-            response = await client.request(
-                method,
-                f"{instance.url}{endpoint}",
-                json=data,
-                timeout=HTTP_TIMEOUT
-            )
-            
-            if response.status_code >= 500:
-                instance.record_error()
-                if retries > 0:
-                    await asyncio.sleep(RETRY_DELAY)
-                    return await self.execute_request(client, endpoint, method, data, retries - 1)
-                raise HTTPException(status_code=response.status_code, detail="Backend service error")
-            
-            instance.record_success()
-            instance.record_response_time(time.time() - start_time)
-            return response.json(), instance
-            
-        except Exception as e:
-            instance.record_error()
-            if retries > 0:
-                await asyncio.sleep(RETRY_DELAY)
-                return await self.execute_request(client, endpoint, method, data, retries - 1)
-            raise HTTPException(status_code=500, detail=str(e))
-
 # Initialize load balancer
 load_balancer = LoadBalancer()
 
@@ -344,30 +309,97 @@ async def health():
         "status": "ok"
     }
 
+# Add cache decorator
+@lru_cache(maxsize=1000)
+def _get_cache_key(request_data: str) -> str:
+    """Generate a cache key from request data"""
+    return hashlib.md5(request_data.encode()).hexdigest()
+
+# Add rate limiter middleware
+app.add_middleware(
+    RateLimitMiddleware,
+    rate_limit=RATE_LIMIT
+)
+
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
-async def chat_completions(request: Request, chat_request: ChatCompletionRequest):
-    """Handle chat completion requests"""
+async def chat_completions(
+    request: Request,
+    chat_request: ChatCompletionRequest,
+    response: Response
+):
+    """Handle chat completion requests with optimizations"""
     try:
+        # Validate request
+        if not chat_request.messages:
+            raise HTTPException(status_code=400, detail="No messages provided")
+        
         chat_request.model = CONFIG["model"]["id"]
+        instance = await load_balancer.get_next_instance()
+        
+        if not instance:
+            logger.error("No healthy instances available")
+            raise HTTPException(status_code=503, detail="No healthy instances available")
+
+        # For non-streaming requests, check cache first
+        if not chat_request.stream:
+            cache_key = _get_cache_key(json.dumps(chat_request.dict()))
+            cached_response = _get_cache_key.cache_info()
+            if cached_response:
+                response.headers["X-Cache"] = "HIT"
+                return cached_response
+
         if chat_request.stream:
             async def stream_generator():
                 try:
-                    response, instance = await load_balancer.execute_request(
-                        request.app.state.client,
-                        "/v1/chat/completions",
-                        data=chat_request.dict()
-                    )
-                    
-                    async for chunk in response:
-                        if isinstance(chunk, dict):
-                            yield f"data: {json.dumps(chunk)}\n\n"
-                        else:
-                            yield f"data: {chunk}\n\n"
+                    async with request.app.state.client.stream(
+                        "POST",
+                        f"{instance.url}/v1/chat/completions",
+                        json=chat_request.dict(),
+                        timeout=STREAM_TIMEOUT
+                    ) as response:
+                        if response.status_code != 200:
+                            error_text = await response.text()
+                            logger.error(f"Streaming error: {response.status_code} - {error_text}")
+                            if response.status_code < 500:
+                                error_msg = f"data: {{'error':{{'message':'{error_text}','code':{response.status_code}}}}}\n\n"
+                                yield error_msg
+                                return
+                            else:
+                                raise HTTPException(status_code=response.status_code, detail=error_text)
+
+                        # Optimize buffer handling with fixed size
+                        buffer = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            buffer.extend(chunk)
+                            if len(buffer) >= MAX_BUFFER_SIZE:
+                                # Process complete lines
+                                text = buffer.decode('utf-8')
+                                lines = text.split('\n')
+                                # Keep the last partial line in buffer
+                                buffer = bytearray(lines[-1].encode())
+                                # Yield complete lines
+                                for line in lines[:-1]:
+                                    if line.strip():
+                                        yield f"data: {line}\n\n"
+
+                        # Process remaining buffer
+                        if buffer:
+                            text = buffer.decode('utf-8')
+                            if text.strip():
+                                yield f"data: {text}\n\n"
+                        
+                        yield "data: [DONE]\n\n"
+
+                except httpx.TimeoutException as e:
+                    logger.error(f"Timeout during streaming: {str(e)}")
+                    error_msg = f"data: {{'error':{{'message':'Request timed out','code':504}}}}\n\n"
+                    yield error_msg
                     yield "data: [DONE]\n\n"
                 except Exception as e:
                     logger.error(f"Error in stream: {str(e)}")
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    error_msg = f"data: {{'error':{{'message':'{str(e)}','code':500}}}}\n\n"
+                    yield error_msg
                     yield "data: [DONE]\n\n"
 
             return StreamingResponse(
@@ -375,12 +407,39 @@ async def chat_completions(request: Request, chat_request: ChatCompletionRequest
                 media_type="text/event-stream"
             )
         else:
-            response, instance = await load_balancer.execute_request(
-                request.app.state.client,
-                "/v1/chat/completions",
-                data=chat_request.dict()
-            )
-            return response
+            try:
+                # Use connection pooling for better performance
+                async with request.app.state.client as client:
+                    response = await client.post(
+                        f"{instance.url}/v1/chat/completions",
+                        json=chat_request.dict(),
+                        timeout=HTTP_TIMEOUT
+                    )
+                
+                if response.status_code != 200:
+                    error_text = response.text
+                    logger.error(f"Error: {response.status_code} - {error_text}")
+                    if response.status_code < 500:
+                        raise HTTPException(status_code=response.status_code, detail=error_text)
+                    else:
+                        raise HTTPException(status_code=response.status_code, detail=error_text)
+                
+                response_data = response.json()
+                response.headers["X-Cache"] = "MISS"
+                
+                # Cache successful responses
+                cache_key = _get_cache_key(json.dumps(chat_request.dict()))
+                _get_cache_key.cache_clear()  # Clear old cache entries
+                _get_cache_key.cache_info()  # Update cache info
+                
+                return response_data
+                
+            except httpx.TimeoutException as e:
+                logger.error(f"Timeout during request: {str(e)}")
+                raise HTTPException(status_code=504, detail=str(e))
+            except Exception as e:
+                logger.error(f"Error processing request: {str(e)}")
+                raise HTTPException(status_code=500, detail=str(e))
 
     except Exception as e:
         logger.error(f"Error processing chat completion: {str(e)}")
