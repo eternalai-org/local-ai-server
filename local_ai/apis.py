@@ -441,6 +441,5 @@ if __name__ == "__main__":
         "local_ai.apis:app",
         host="0.0.0.0",
         port=CONFIG["proxy_port"],
-        workers=CONFIG["workers"],
-        reload=True
+        workers=CONFIG["workers"]
     )
