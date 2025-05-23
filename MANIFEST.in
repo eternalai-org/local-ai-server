@@ -1,3 +1,2 @@
 include README.md
-recursive-include local_ai/examples/templates/*.jinja
-recursive-include local_ai/examples/best_practices/*.json
+include configs/*.yaml

@@ -1,5 +1,5 @@
-load_balancer: true
 proxy_port: 65534
+workers: 8
 model:
   - id: "Qwen/32B-FP8"
   - hash: bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i
