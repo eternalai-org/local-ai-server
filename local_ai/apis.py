@@ -11,6 +11,7 @@ import asyncio
 import time
 import random
 import uvicorn
+import json
 from typing import Dict, List, Optional, Tuple, Any, Set
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -24,7 +25,8 @@ from contextlib import asynccontextmanager
 
 # Import schemas from schema.py (assumed to exist in your project)
 from local_ai.schema import (
-    ChatCompletionRequest
+    ChatCompletionRequest,
+    ChatCompletionResponse,
 )
 
 class ErrorHandlingStreamHandler(logging.StreamHandler):
@@ -302,6 +304,13 @@ async def health():
         "status": "ok"
     }
 
+@app.get("/v1/models")
+async def models():
+    """Models endpoint"""
+    return {
+        "data": [{"id": CONFIG["model"]["id"], "object": "model"}]
+    }
+
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request, chat_request: ChatCompletionRequest) -> Any:
@@ -339,6 +348,9 @@ async def chat_completions(request: Request, chat_request: ChatCompletionRequest
                                 line, buffer = buffer.split('\n', 1)
                                 if line.strip():
                                     yield f"{line}\n\n"
+                                    # json_line = json.loads(line.strip())
+                                    # choices = 
+
                         if buffer.strip():
                             yield f"{buffer}\n\n"
                             
@@ -388,3 +400,4 @@ if __name__ == "__main__":
         port=CONFIG.get("proxy_port", 65534),
         workers=CONFIG.get("workers", 1)
     )
+
