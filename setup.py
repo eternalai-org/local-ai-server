@@ -9,6 +9,7 @@ setup(
         "local_ai": [
             "examples/templates/*.jinja",
             "examples/best_practices/*.json",
+            "../configs/*.yaml",
         ],
     },
     include_package_data=True,
