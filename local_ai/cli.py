@@ -36,7 +36,7 @@ def handle_status(args):
         return None
     
     model_hash = CONFIG["model"]["hash"]
-    
+    print(model_hash)
     return model_hash
     
 
