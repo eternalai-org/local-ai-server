@@ -307,15 +307,13 @@ async def health():
 @app.get("/v1/models")
 async def models():
     """Models endpoint"""
-    urls = CONFIG.get("urls", [])
-    for url in urls:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{url}/v1/models")
-            if response.status_code == 200:
-                return response.json()
-            else:
-                logger.error(f"Error getting models from {url}: {response.status_code}")
-                return {"error": "Failed to get models"}
+    return {
+        "object": "list",
+        "data": [{
+            "id": CONFIG["model"]["id"],
+            "object": "model",
+        }]
+    }
 
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
