@@ -253,6 +253,12 @@ class LoadBalancer:
     async def get_next_instance(self) -> Optional[BackendInstance]:
         """Get the next available instance using a weighted selection based on performance metrics"""
         async with self.lock:
+            # If there's only one instance, return it directly without load balancing
+            if len(self.instances) == 1:
+                instance = list(self.instances.values())[0]
+                instance.last_checked = time.time()
+                return instance
+
             current_time = time.time()
             healthy_instances = [i for i in self.instances.values() if i.healthy]
             
