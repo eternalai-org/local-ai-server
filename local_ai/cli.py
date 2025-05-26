@@ -27,7 +27,6 @@ def version_command():
     )
 
 def handle_status(args):
-    urls = CONFIG["urls"]
     proxy_port = CONFIG["proxy_port"]
 
     if health_check(f"http://localhost:{proxy_port}"):
@@ -37,13 +36,7 @@ def handle_status(args):
         return None
     
     model_hash = CONFIG["model"]["hash"]
-    for url in urls:
-        if health_check(url):
-            logger.info(f"Instance {url} is healthy")
-        else:
-            logger.error(f"Instance {url} is not healthy")
-            return None
-        
+    
     return model_hash
     
 
