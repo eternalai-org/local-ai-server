@@ -25,8 +25,7 @@ from contextlib import asynccontextmanager
 
 # Import schemas from schema.py (assumed to exist in your project)
 from local_ai.schema import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
+    ChatCompletionRequest
 )
 
 class ErrorHandlingStreamHandler(logging.StreamHandler):
@@ -329,6 +328,14 @@ async def chat_completions(request: Request, chat_request: ChatCompletionRequest
         # Only set model if not already set
         if not getattr(chat_request, "model", None):
             chat_request.model = CONFIG["model"]["id"]
+        
+        chat_request.model = "Qwen/32B-FP8"
+        chat_request.temperature = 0.7
+        chat_request.top_k = 20
+        chat_request.top_p = 0.8
+        chat_request.presence_penalty = 1.5
+        chat_request.max_tokens = 8192
+
         instance = await load_balancer.get_next_instance()
         if not instance:
             logger.error("No healthy instances available for chat completion request.")
