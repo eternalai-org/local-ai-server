@@ -1,7 +1,7 @@
 proxy_port: 65534
 workers: 1
 model:
-  id: "Qwen/32B-FP8"
+  id: "Qwen/32B"
   hash: bafkreihq4usl2t3i6pqoilvorp4up263yieuxcqs6xznlmrig365bvww5i
 urls:
   - url: http://localhost:8081
